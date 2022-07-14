@@ -108,6 +108,7 @@ bool doConnect=false;
 
 ulong lastWorkingTime = 0;
 
+#include "debounceButton.h"
 #include <HX711.h>
 // setting pins for the load cell for braking system
 const int BRAKE_DOUT_PIN = 32;
@@ -116,9 +117,12 @@ HX711 brakeSensor;
 const int scaleFactor = -5000;
 
 long brakeZeroOffset;
+const int ZeroPin = 27;
+debounceButton zeroButton(ZeroPin);
 
 void calcZeroOffset()
 {
+  lastWorkingTime = millis();
   Serial.println("Calibrating Zero");
   for (int i = 0; i < 10; i++)
   {
@@ -330,6 +334,11 @@ struct messageBuffer
 {
   float brake;
   unsigned long state;
+  // state = 0: initial state
+  // state = 1: button was clicked --> calcZeroOffset --> send device info
+  // state = 2: butteon isPressed --> blink & toggleLED --> esp_restart()
+  // state = 4: button was double clicked --> Configuration portal requested --> startConfigAP
+
 };
 
 struct messageBuffer mb;
@@ -912,6 +921,14 @@ void startConfigAP()
 
 }
 
+void doSleep()
+{
+   //Configure GPIO33 as ext0 wake up source for HIGH logic level
+ // esp_sleep_enable_ext0_wakeup((gpio_num_t)ZeroPin,0);
+
+  //Go to sleep now
+  esp_deep_sleep_start();
+}
 
 void setup()
 {
@@ -1149,7 +1166,6 @@ if (FORMAT_FILESYSTEM)
     saveConfigData();
   }
 
-
   startedAt = millis();
 
   if (!initialConfig)
@@ -1234,13 +1250,14 @@ if (FORMAT_FILESYSTEM)
   
   brakeSensor.begin(BRAKE_DOUT_PIN, BRAKE_SCK_PIN);
   calcZeroOffset();
-  // zeroButton.init(true); // debounce button, might need to implement after
-
-  calcZeroOffset();
+  zeroButton.init(true); 
   sendDeviceInfo(WiFi.broadcastIP());
 
 
 
+  unsigned long frameTime = 0 ;
+  unsigned long pressedTime=0 ;
+  // Bluetooth to connect with Tacx2
   BLEDevice::init("ESP32-BLE-Client");
 
   /* Retrieve a Scanner and set the callback we want to use to be informed when we
@@ -1258,7 +1275,6 @@ if (FORMAT_FILESYSTEM)
 
   Serial.print("BLE Scan started: ");
   digitalWrite(LED_BUILTIN,LED_ON);
-  
   Serial.println("Finished Setup");
 }
 
@@ -1283,12 +1299,13 @@ enum opCodes
 } ;
 
 bool firstTime = true;
-unsigned long startMillis;
-unsigned long currentMillis;
-const unsigned long period = 300; // modify period to read more or less often
+// modify period to read from load cell (brake) more or less often
+const unsigned long period = 300; 
+unsigned long pressedTime=0;
 
 void loop()
 {
+  long reading;
  if(doConnect)
  {
   
@@ -1322,7 +1339,7 @@ void loop()
      msg.opCode = ocSetTargetResistaneLevel;
      msg.resistance = 8;
      pResistanceCharacteristic->writeValue((uint8_t *)&msg, sizeof(msg),true);
-Serial.println("update");
+    Serial.println("update");
      result = pResistanceCharacteristic->readRawData();
      if(result)
        {
@@ -1336,30 +1353,133 @@ Serial.println("update");
        sleep(1);
    }
  }
- currentMillis = millis();
-  if (currentMillis - startMillis >= period)
+ unsigned long frameTime = millis();
+  if (frameTime - lastWorkingTime >= period)
   {
     if (brakeSensor.is_ready()) 
     {
       brakeSensor.set_scale();    
       //Serial.println("Start Reading");
-      long reading = (brakeSensor.read() - brakeZeroOffset)/scaleFactor;
+      reading = (brakeSensor.read() - brakeZeroOffset)/scaleFactor;
       //Serial.print("Result: ");
       //Serial.println(reading);
-      startMillis = currentMillis; 
+      lastWorkingTime = frameTime; 
     } 
     else 
     {
       Serial.println("HX711 not found.");
     }
   }
-}
+  mb.state = 0;
+  if(zeroButton.wasKlicked())
+  { 
+    Serial.printf("button Klicked\n");
+    calcZeroOffset();
+    sendDeviceInfo(WiFi.broadcastIP()); // re announce ourselves
+    lastWorkingTime=frameTime;
+    mb.state = 1;
+  }
+  
+  static int nblink=0;
+  if(zeroButton.isPressed())
+  { 
+    lastWorkingTime=frameTime;
+    Serial.printf("button isPressed\n");
+    mb.state = 2;
+    if((frameTime-(pressedTime+(nblink*200))) >200)
+    {
+      nblink++;
+      toggleLED();
+    }
+    if(frameTime-pressedTime > 5000)
+    {
+      esp_restart();
+    }
+  }
+  else
+  {
+    pressedTime = frameTime;
+    nblink=0;
+  }
+  if(zeroButton.wasDoubleKlicked())
+  {
+    lastWorkingTime=frameTime;
+    Serial.printf("button Double Klicked\n");
+    Serial.println(F("\nConfiguration portal requested."));
+    startConfigAP();
+    mb.state = 4;
+  }
+  ArduinoOTA.handle();
+  debounceButton::update();
+  int received = toCOVER.parsePacket();
+  if(received>0)
+  {
+      char buffer[100];
+      int numRead = toCOVER.read(buffer, 100);
+      if(numRead > 0)
+      {
+          Serial.printf("Read %d bytes\n",numRead);
+          if(numRead >= 5)
+          {
+            if(strcmp(buffer,"enum")==0)
+            {
+              Serial.printf("enum\n");
+              sendDeviceInfo(toCOVER.remoteIP());
+            }
+            if(strcmp(buffer,"start")==0)
+            {
+              Serial.printf("start\n");
+              coverIP = toCOVER.remoteIP();
+            }
+            if(strcmp(buffer,"stop")==0)
+            {
+              Serial.printf("stop\n");
+              coverIP = (uint32_t)0;
+            }
+          }
+      }
+  }
+  if (coverIP != 0)
+  {
+    toCOVER.beginPacket(coverIP, coverPort);
+    mb.brake = reading;
+    toCOVER.beginPacket(coverIP, pluginPort);
+    toCOVER.write((const uint8_t *)&mb, sizeof(mb));
+    toCOVER.endPacket();
+    
+    lastWorkingTime=frameTime;
+    
+  digitalWrite(LED_BUILTIN, LED_ON);
+  }
+  else // we are not doing anything
+  {
+    static bool timeoutWarning = false;
+    if ((frameTime - lastWorkingTime) > 600000)
+    {
+      if (!timeoutWarning)
+      {
+        nblink = 0;
+        timeoutWarning = true;
+      }
+    }
+    else
+    {
+      timeoutWarning = false;
+    }
+    if ((frameTime - lastWorkingTime) > 610000)
+    {
+      doSleep();
+    }
+    if ((frameTime - (lastWorkingTime + (nblink * 200))) > 200)
+    {
+      nblink++;
+      toggleLED();
+    }
+  }
 
-void doSleep()
-{
-   //Configure GPIO33 as ext0 wake up source for HIGH logic level
- // esp_sleep_enable_ext0_wakeup((gpio_num_t)ZeroPin,0);
+  check_status();
+  delay(100);
+  }
 
-  //Go to sleep now
-  esp_deep_sleep_start();
-}
+
+
