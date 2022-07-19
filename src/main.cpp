@@ -1,6 +1,7 @@
 
 #include <ArduinoOTA.h>
 #include <esp_task_wdt.h>
+#include <ESP32Encoder.h>
 #define DeviceName "Flux2"
 #include "BLEDevice.h"
 
@@ -114,11 +115,19 @@ ulong lastWorkingTime = 0;
 const int BRAKE_DOUT_PIN = 32;
 const int BRAKE_SCK_PIN = 33;
 HX711 brakeSensor;
-const int scaleFactor = -5000;
+const int brakeScaleFactor = -5000;
 
 long brakeZeroOffset;
-const int ZeroPin = 27;
+const int ZeroPin = 25;
 debounceButton zeroButton(ZeroPin);
+
+// Pins for encoder to get steering wheel angle
+const int I_PIN = 14;
+const int A_PIN = 27;
+const int B_PIN = 26;
+int encoderCount;
+const int angleFactor = 1;
+ESP32Encoder encoder;
 
 void calcZeroOffset()
 {
@@ -128,15 +137,15 @@ void calcZeroOffset()
   {
     if (brakeSensor.wait_ready_timeout(1000))
     {
-      long reading = brakeSensor.read();
+      long breakReading = brakeSensor.read();
       if (i == 0)
       {
-        brakeZeroOffset = reading;
+        brakeZeroOffset = breakReading;
       }
       else
       {
         // brakeZeroOffset is the average of the other trials
-        brakeZeroOffset = ((float)(i-1)/float(i))*brakeZeroOffset + (1.0/float(i)) * reading;
+        brakeZeroOffset = ((float)(i-1)/float(i))*brakeZeroOffset + (1.0/float(i)) * breakReading;
       }
     }
   }
@@ -333,6 +342,8 @@ void sendDeviceInfo(IPAddress destinationAddress)
 struct messageBuffer
 {
   float brake;
+  float speed;
+  int steeringAngle;
   unsigned long state;
   // state = 0: initial state
   // state = 1: button was clicked --> calcZeroOffset --> send device info
@@ -1270,16 +1281,21 @@ if (FORMAT_FILESYSTEM)
   pBLEScan->setActiveScan(true);
   
   pBLEScan->start(5, false);
-  Serial.println("Finished up to here");
   BLEDevice::getScan()->start(5);
 
-  Serial.print("BLE Scan started: ");
+  //Serial.print("BLE Scan started: ");
+  // Encoder setup
+  ESP32Encoder::useInternalWeakPullResistors=UP;
+  encoder.attachHalfQuad(A_PIN, B_PIN);
+  encoder.setCount(0);
   digitalWrite(LED_BUILTIN,LED_ON);
+
   Serial.println("Finished Setup");
 }
 
 #pragma pack(push,1)
 #pragma pack(1)
+// powerMessage has operational code and resistance that needs to be passed to Flux2
 struct powerMessage {
   uint8_t opCode;
   uint16_t resistance; 
@@ -1305,7 +1321,25 @@ unsigned long pressedTime=0;
 
 void loop()
 {
-  long reading;
+  encoderCount = encoder.getCount();
+  long brakeReading;
+  unsigned long frameTime = millis();
+  if (frameTime - lastWorkingTime >= period)
+  {
+    if (brakeSensor.is_ready()) 
+    {
+      brakeSensor.set_scale();    
+      //Serial.println("Start Reading");
+      brakeReading = (brakeSensor.read() - brakeZeroOffset)/brakeScaleFactor;
+      //Serial.print("Result: ");
+      //Serial.println(brakeReading);
+      lastWorkingTime = frameTime; 
+    } 
+    else 
+    {
+      Serial.println("HX711 not found.");
+    }
+  }
  if(doConnect)
  {
   
@@ -1335,9 +1369,11 @@ void loop()
        sleep(1);
        firstTime=false;
      }
+     // setting target resistance level, this should depend on the brake (load cell)
      powerMessage msg;
      msg.opCode = ocSetTargetResistaneLevel;
-     msg.resistance = 8;
+     // resistance depends on the load cell, modify brakeScaleFactor for scaling resistance
+     msg.resistance = brakeReading;
      pResistanceCharacteristic->writeValue((uint8_t *)&msg, sizeof(msg),true);
     Serial.println("update");
      result = pResistanceCharacteristic->readRawData();
@@ -1353,23 +1389,7 @@ void loop()
        sleep(1);
    }
  }
- unsigned long frameTime = millis();
-  if (frameTime - lastWorkingTime >= period)
-  {
-    if (brakeSensor.is_ready()) 
-    {
-      brakeSensor.set_scale();    
-      //Serial.println("Start Reading");
-      reading = (brakeSensor.read() - brakeZeroOffset)/scaleFactor;
-      //Serial.print("Result: ");
-      //Serial.println(reading);
-      lastWorkingTime = frameTime; 
-    } 
-    else 
-    {
-      Serial.println("HX711 not found.");
-    }
-  }
+ 
   mb.state = 0;
   if(zeroButton.wasKlicked())
   { 
@@ -1442,7 +1462,8 @@ void loop()
   if (coverIP != 0)
   {
     toCOVER.beginPacket(coverIP, coverPort);
-    mb.brake = reading;
+    mb.brake = brakeReading;
+    mb.steeringAngle = encoderCount * angleFactor;
     toCOVER.beginPacket(coverIP, pluginPort);
     toCOVER.write((const uint8_t *)&mb, sizeof(mb));
     toCOVER.endPacket();
