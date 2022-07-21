@@ -111,14 +111,13 @@ ulong lastWorkingTime = 0;
 
 #include "debounceButton.h"
 #include "loadCell.h"
-
 // setting pins for the load cell for braking system
 const int BRAKE_DOUT_PIN = 32;
 const int BRAKE_SCK_PIN = 33;
-loadCell *brakeSensor = new loadCell(BRAKE_DOUT_PIN, BRAKE_SCK_PIN);
-const int brakeScaleFactor = -5000;
-
-long brakeZeroOffset;
+//HX711 brakeSensor;
+loadCell *brakeSensor;
+const int brakeScaleFactor = -5000; // modify this to change the scale factor to adjust the sensitivity of the sensor
+const unsigned long period = 300; 
 const int ZeroPin = 25;
 debounceButton zeroButton(ZeroPin);
 
@@ -129,31 +128,6 @@ const int B_PIN = 26;
 int encoderCount;
 const int angleFactor = 1;
 ESP32Encoder encoder;
-
-/*
-void calcZeroOffset()
-{
-  lastWorkingTime = millis();
-  Serial.println("Calibrating Zero");
-  for (int i = 0; i < 10; i++)
-  {
-    if (brakeSensor.wait_ready_timeout(1000))
-    {
-      long breakReading = brakeSensor.read();
-      if (i == 0)
-      {
-        brakeZeroOffset = breakReading;
-      }
-      else
-      {
-        // brakeZeroOffset is the average of the other trials
-        brakeZeroOffset = ((float)(i-1)/float(i))*brakeZeroOffset + (1.0/float(i)) * breakReading;
-      }
-    }
-  }
-}
-
-*/
 
 void toggleLED()
 {
@@ -212,7 +186,6 @@ static void notifyResistanceCallback(BLERemoteCharacteristic* pBLERemoteCharacte
   value = *((uint8_t *)pData+2);
   Serial.println(value);
 }
-
 
 class MyClientCallback : public BLEClientCallbacks
 {
@@ -961,6 +934,8 @@ void setup()
 
   Serial.setDebugOutput(false);
 
+  brakeSensor = new loadCell(BRAKE_DOUT_PIN, BRAKE_SCK_PIN);
+
 if (FORMAT_FILESYSTEM) 
     FileFS.format();
 
@@ -1265,8 +1240,6 @@ if (FORMAT_FILESYSTEM)
   zeroButton.init(true); 
   sendDeviceInfo(WiFi.broadcastIP());
 
-
-
   unsigned long frameTime = 0 ;
   unsigned long pressedTime=0 ;
   // Bluetooth to connect with Tacx2
@@ -1316,8 +1289,6 @@ enum opCodes
 } ;
 
 bool firstTime = true;
-// modify period to read from load cell (brake) more or less often
-const unsigned long period = 300; 
 unsigned long pressedTime=0;
 
 void loop()
@@ -1325,11 +1296,16 @@ void loop()
   encoderCount = encoder.getCount();
   long brakeReading;
   unsigned long frameTime = millis();
-  brakeReading = brakeSensor->update();
+  if (frameTime - lastWorkingTime >= period)
+  {
+    brakeSensor->update(&brakeReading);
+    Serial.print("Result: ");
+    Serial.println(brakeReading);
+  }
+  
  if(doConnect)
  {
-  
-      connectToServer();
+  connectToServer();
   doConnect = false;
  } 
  if(connected)

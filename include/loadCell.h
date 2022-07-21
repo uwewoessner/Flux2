@@ -7,8 +7,9 @@ class loadCell
 {
     public:
         loadCell(int dout_pin, int sck_pin);
-        float update(); // return the float of the magnitude of force applied on the load cell
+        void update(long* brakeReading); // return the float of the magnitude of force applied on the load cell
         void calcZeroOffset();
+        int doutPin;
 
     private:
         HX711 brakeSensor;
@@ -17,8 +18,8 @@ class loadCell
         
         float brakeZeroOffset;
         float brakeReading;
-        static const int brakeScaleFactor = -5000;
-        static const int period = 300;
+        static const int brakeScaleFactor = -5000; // modify this to change the scale factor to adjust the sensitivity of the sensor
+        static const int period = 300; // modify this to change how often it checks the reading
 };
 
 #endif

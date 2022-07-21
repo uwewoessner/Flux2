@@ -1,12 +1,14 @@
 
 #include "loadCell.h"
 
+unsigned long loadCell::currentTime = 0;
+unsigned long loadCell::previousTime = 0;
 
 loadCell::loadCell(int doutPin, int sckPin)
 {
     brakeSensor.begin(doutPin, sckPin);
-    previousTime = 0;
-    currentTime = 0;
+    doutPin = doutPin;
+    calcZeroOffset();
 }
 
 
@@ -40,23 +42,18 @@ void loadCell::calcZeroOffset()
  * Update the value of the load cell
  * @return float of the reading of the load cell after the most recent update
  */
-float loadCell::update()
+void loadCell::update(long* brakeReading)
 {
     currentTime = millis();
     // Update and return the reading for the force value
-    if (currentTime - previousTime >= period)
+    if (brakeSensor.is_ready())
     {
-        if (brakeSensor.is_ready())
-        {
-            brakeSensor.set_scale();
-            brakeReading = (brakeSensor.read() - brakeZeroOffset)/brakeScaleFactor;
-            previousTime = currentTime;
-            return brakeReading;
-        }
+        brakeSensor.set_scale();
+        *brakeReading = (brakeSensor.read() - brakeZeroOffset)/brakeScaleFactor;
+        previousTime = currentTime;
     }
     else
     {
         Serial.println("HX711 not found.");
     }
-    return 0.0;
 }
