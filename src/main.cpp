@@ -22,7 +22,7 @@
 WiFiMulti wifiMulti;
 
 // Use LittleFS
-#include "FS.h"
+//#include "FS.h"
 
 #include <LITTLEFS.h> 
 
@@ -110,11 +110,12 @@ bool doConnect=false;
 ulong lastWorkingTime = 0;
 
 #include "debounceButton.h"
-#include <HX711.h>
+#include "loadCell.h"
+
 // setting pins for the load cell for braking system
 const int BRAKE_DOUT_PIN = 32;
 const int BRAKE_SCK_PIN = 33;
-HX711 brakeSensor;
+loadCell *brakeSensor = new loadCell(BRAKE_DOUT_PIN, BRAKE_SCK_PIN);
 const int brakeScaleFactor = -5000;
 
 long brakeZeroOffset;
@@ -129,6 +130,7 @@ int encoderCount;
 const int angleFactor = 1;
 ESP32Encoder encoder;
 
+/*
 void calcZeroOffset()
 {
   lastWorkingTime = millis();
@@ -150,6 +152,8 @@ void calcZeroOffset()
     }
   }
 }
+
+*/
 
 void toggleLED()
 {
@@ -1258,9 +1262,6 @@ if (FORMAT_FILESYSTEM)
   });
   ArduinoOTA.begin();
   toCOVER.begin(coverPort);
-  
-  brakeSensor.begin(BRAKE_DOUT_PIN, BRAKE_SCK_PIN);
-  calcZeroOffset();
   zeroButton.init(true); 
   sendDeviceInfo(WiFi.broadcastIP());
 
@@ -1324,22 +1325,7 @@ void loop()
   encoderCount = encoder.getCount();
   long brakeReading;
   unsigned long frameTime = millis();
-  if (frameTime - lastWorkingTime >= period)
-  {
-    if (brakeSensor.is_ready()) 
-    {
-      brakeSensor.set_scale();    
-      //Serial.println("Start Reading");
-      brakeReading = (brakeSensor.read() - brakeZeroOffset)/brakeScaleFactor;
-      //Serial.print("Result: ");
-      //Serial.println(brakeReading);
-      lastWorkingTime = frameTime; 
-    } 
-    else 
-    {
-      Serial.println("HX711 not found.");
-    }
-  }
+  brakeReading = brakeSensor->update();
  if(doConnect)
  {
   
@@ -1394,7 +1380,7 @@ void loop()
   if(zeroButton.wasKlicked())
   { 
     Serial.printf("button Klicked\n");
-    calcZeroOffset();
+    brakeSensor->calcZeroOffset();
     sendDeviceInfo(WiFi.broadcastIP()); // re announce ourselves
     lastWorkingTime=frameTime;
     mb.state = 1;
