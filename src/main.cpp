@@ -1299,8 +1299,8 @@ void loop()
   if (frameTime - lastWorkingTime >= period)
   {
     brakeSensor->update(&brakeReading);
-    Serial.print("Result: ");
-    Serial.println(brakeReading);
+    //Serial.print("Result: ");
+    //Serial.println(brakeReading);
   }
   
  if(doConnect)
