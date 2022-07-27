@@ -129,6 +129,7 @@ int encoderCount;
 const int angleFactor = 1;
 ESP32Encoder encoder;
 
+
 void toggleLED()
 {
   //toggle state
@@ -148,6 +149,23 @@ static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic,
   Serial.print("data: ");
   value = *((uint16_t *)pData+1);
   Serial.println(value);
+}
+
+void encoderSetup()
+{
+  // Encoder setup
+  ESP32Encoder::useInternalWeakPullResistors=UP;
+  encoder.attachHalfQuad(A_PIN, B_PIN);
+  
+  // Read the signal of the index pin
+  while(digitalRead(I_PIN))
+  {
+    Serial.println("Calibrating angle, please keep turning");
+  }
+  Serial.println("Done calibrating angle");
+  encoder.setCount(0);
+
+  digitalWrite(LED_BUILTIN,LED_ON);
 }
 
 static void notifyStatusCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic,
@@ -1256,12 +1274,8 @@ if (FORMAT_FILESYSTEM)
   
   pBLEScan->start(5, false);
   BLEDevice::getScan()->start(5);
-
-  //Serial.print("BLE Scan started: ");
-  // Encoder setup
-  ESP32Encoder::useInternalWeakPullResistors=UP;
-  encoder.attachHalfQuad(A_PIN, B_PIN);
-  encoder.setCount(0);
+  pinMode(I_PIN, INPUT_PULLUP);
+  encoderSetup();
   digitalWrite(LED_BUILTIN,LED_ON);
 
   Serial.println("Finished Setup");
