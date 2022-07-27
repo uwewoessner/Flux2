@@ -1,3 +1,4 @@
+
 #include "loadCell.h"
 
 unsigned long loadCell::currentTime = 0;
@@ -9,6 +10,7 @@ loadCell::loadCell(int doutPin, int sckPin)
     doutPin = doutPin;
     calcZeroOffset();
 }
+
 
 /**
  * Calculate and update the zero offset of the load cell when there is no force applied to it
