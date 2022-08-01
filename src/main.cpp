@@ -114,18 +114,19 @@ ulong lastWorkingTime = 0;
 // setting pins for the load cell for braking system
 const int BRAKE_DOUT_PIN = 32;
 const int BRAKE_SCK_PIN = 33;
-//HX711 brakeSensor;
 loadCell *brakeSensor;
 const int brakeScaleFactor = -5000; // modify this to change the scale factor to adjust the sensitivity of the sensor
 const unsigned long period = 300; 
 const int ZeroPin = 25;
 debounceButton zeroButton(ZeroPin);
 
+float speed;
+
 // Pins for encoder to get steering wheel angle
 const int I_PIN = 14;
 const int A_PIN = 27;
 const int B_PIN = 26;
-int encoderCount;
+float encoderCount;
 const int angleFactor = 1;
 ESP32Encoder encoder;
 
@@ -149,6 +150,7 @@ static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic,
   Serial.print("data: ");
   value = *((uint16_t *)pData+1);
   Serial.println(value);
+  speed = value;
 }
 
 void encoderSetup()
@@ -171,11 +173,7 @@ void encoderSetup()
 static void notifyStatusCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic,
                             uint8_t* pData, size_t length, bool isNotify)
 {
-  //Serial.print("Notify Status callback for characteristic ");
-  //Serial.print(pBLERemoteCharacteristic->getUUID().toString().c_str());
-  
-    uint8_t value = 0;
-
+  uint8_t value = 0;
   Serial.print("message reply data length ");
   Serial.println(length);
   Serial.print("data: ");
@@ -191,9 +189,7 @@ static void notifyResistanceCallback(BLERemoteCharacteristic* pBLERemoteCharacte
                             uint8_t* pData, size_t length, bool isNotify)
 {
   Serial.print("Resistance Notify callback for characteristic ");
-  
-    uint8_t value = 0;
-
+  uint8_t value = 0;
   Serial.print(" of data length ");
   Serial.println(length);
   Serial.print("data: ");
@@ -209,7 +205,6 @@ class MyClientCallback : public BLEClientCallbacks
 {
   void onConnect(BLEClient* pclient)
   {
-    
     Serial.println("Connect");
   }
 
@@ -310,7 +305,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks
     if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(serviceUUID))
     {
       BLEDevice::getScan()->stop();
-    Serial.print("Scanning stopped ");
+      Serial.print("Scanning stopped ");
       myDevice = new BLEAdvertisedDevice(advertisedDevice);
       doConnect = true;
     }
@@ -337,8 +332,8 @@ void sendDeviceInfo(IPAddress destinationAddress)
 struct messageBuffer
 {
   float brake;
+  float steeringAngle;
   float speed;
-  int steeringAngle;
   unsigned long state;
   // state = 0: initial state
   // state = 1: button was clicked --> calcZeroOffset --> send device info
@@ -483,7 +478,6 @@ IPAddress APStaticSN  = IPAddress(255, 255, 255, 0);
 #include <ESPAsync_WiFiManager.h>              //https://github.com/khoih-prog/ESPAsync_WiFiManager
 
 #define HTTP_PORT     80
-
 
 
 WiFi_AP_IPConfig  WM_AP_IPconfig;
@@ -1272,8 +1266,8 @@ if (FORMAT_FILESYSTEM)
   pBLEScan->setWindow(449);
   pBLEScan->setActiveScan(true);
   
-  pBLEScan->start(5, false);
-  BLEDevice::getScan()->start(5);
+  pBLEScan->start(1, false);
+  BLEDevice::getScan()->start(1);
   pinMode(I_PIN, INPUT_PULLUP);
   encoderSetup();
   digitalWrite(LED_BUILTIN,LED_ON);
@@ -1304,19 +1298,25 @@ enum opCodes
 
 bool firstTime = true;
 unsigned long pressedTime=0;
+long brakeReading;
 
 void loop()
 {
   encoderCount = encoder.getCount();
-  long brakeReading;
+  mb.steeringAngle = encoderCount * angleFactor;
+  brakeSensor->update(&brakeReading);
+  mb.brake = brakeReading;
   unsigned long frameTime = millis();
+  /* This if statement shouldn't be run when ESP connects to COVISE server, 
+        update() shouldn't depend on time as the rate is faster than the response rate anywyas
   if (frameTime - lastWorkingTime >= period)
   {
     brakeSensor->update(&brakeReading);
-    //Serial.print("Result: ");
-    //Serial.println(brakeReading);
+    mb.brake = brakeReading;
+    Serial.print("mb. Result: ");
+    Serial.println(mb.brake);
   }
-  
+  */
  if(doConnect)
  {
   connectToServer();
@@ -1443,10 +1443,8 @@ void loop()
     toCOVER.beginPacket(coverIP, pluginPort);
     toCOVER.write((const uint8_t *)&mb, sizeof(mb));
     toCOVER.endPacket();
-    
     lastWorkingTime=frameTime;
-    
-  digitalWrite(LED_BUILTIN, LED_ON);
+    digitalWrite(LED_BUILTIN, LED_ON);
   }
   else // we are not doing anything
   {
