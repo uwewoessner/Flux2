@@ -1300,7 +1300,7 @@ enum opCodes
 bool firstTime = true;
 unsigned long pressedTime=0;
 long brakeReading;
-
+float resistance;
 void loop()
 {
   encoderCount = encoder.getCount();
@@ -1350,8 +1350,8 @@ void loop()
      // setting target resistance level, this should depend on the brake (load cell)
      powerMessage msg;
      msg.opCode = ocSetTargetResistaneLevel;
-     // resistance depends on the load cell, modify brakeScaleFactor for scaling resistance
-     msg.resistance = brakeReading;
+     // resistance depends on the value sent from COVISE through UDP
+     msg.resistance = resistance;
      pResistanceCharacteristic->writeValue((uint8_t *)&msg, sizeof(msg),true);
     Serial.println("update");
      result = pResistanceCharacteristic->readRawData();
@@ -1413,6 +1413,7 @@ void loop()
   if(received>0)
   {
       char buffer[100];
+      char tmpBuf[100];
       int numRead = toCOVER.read(buffer, 100);
       if(numRead > 0)
       {
@@ -1434,7 +1435,11 @@ void loop()
               Serial.printf("stop\n");
               coverIP = (uint32_t)0;
             }
+            
           }
+          memcpy(&resistance, buffer, sizeof(float));
+          Serial.print("Resistance: ");
+          Serial.println(resistance);
       }
   }
   if (coverIP != 0)
