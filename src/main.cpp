@@ -259,8 +259,8 @@ bool connectToServer()
   }
   Serial.println(" - Found our characteristic");
 
-  if(pRemoteCharacteristic->canNotify())
-  {
+if(pRemoteCharacteristic->canNotify())
+    {
     pRemoteCharacteristic->registerForNotify(notifyCallback);
 
   }
@@ -315,7 +315,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks
 
 // wifi and covise server
 const int coverPort = 31319;
-const int pluginPort = 31320;
+const int pluginPort = 31322;
 WiFiUDP toCOVER;
 IPAddress coverIP((uint32_t)0);
 
@@ -1251,6 +1251,7 @@ if (FORMAT_FILESYSTEM)
   toCOVER.begin(coverPort);
   zeroButton.init(true); 
   sendDeviceInfo(WiFi.broadcastIP());
+  Serial.println("First Send DevInfo");
 
   unsigned long frameTime = 0 ;
   unsigned long pressedTime=0 ;
@@ -1266,8 +1267,8 @@ if (FORMAT_FILESYSTEM)
   pBLEScan->setWindow(449);
   pBLEScan->setActiveScan(true);
   
-  pBLEScan->start(1, false);
-  BLEDevice::getScan()->start(1);
+  pBLEScan->start(5, false);
+  BLEDevice::getScan()->start(5);
   pinMode(I_PIN, INPUT_PULLUP);
   encoderSetup();
   digitalWrite(LED_BUILTIN,LED_ON);
@@ -1304,6 +1305,7 @@ void loop()
 {
   encoderCount = encoder.getCount();
   mb.steeringAngle = encoderCount * angleFactor;
+  mb.speed = speed;
   brakeSensor->update(&brakeReading);
   mb.brake = brakeReading;
   unsigned long frameTime = millis();
@@ -1362,7 +1364,7 @@ void loop()
        else{
         Serial.println("noResponse");
        }
-       sleep(1);
+       //sleep(1);
    }
  }
  
