@@ -1413,7 +1413,6 @@ void loop()
   if(received>0)
   {
       char buffer[100];
-      char tmpBuf[100];
       int numRead = toCOVER.read(buffer, 100);
       if(numRead > 0)
       {
