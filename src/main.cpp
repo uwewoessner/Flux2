@@ -32,11 +32,11 @@ FS *filesystem = &LITTLEFS;
 
 #define ESP_getChipId() ((uint32_t)ESP.getEfuseMac())
 
-#define LED_ON LOW
-#define LED_OFF HIGH
+#define LED_ON HIGH
+#define LED_OFF LOW
 
 //See file .../hardware/espressif/esp32/variants/(esp32|doitESP32devkitV1)/pins_arduino.h
-#define LED_BUILTIN 22 // Pin D2 mapped to pin GPI22/ADC12 of ESP32, control on-board LED
+#define LED_BUILTIN 13 // Pin D2 mapped to pin GPI22/ADC12 of ESP32, control on-board LED
 
 #define PIN_D0 0 // Pin D0 mapped to pin GPIO0/BOOT/ADC11/TOUCH1 of ESP32
 #define PIN_D1 1 // Pin D1 mapped to pin GPIO1/TX0 of ESP32
@@ -47,7 +47,7 @@ FS *filesystem = &LITTLEFS;
 #define PIN_D6 6 // Pin D6 mapped to pin GPIO6/FLASH_SCK of ESP32
 #define PIN_D7 7 // Pin D7 mapped to pin GPIO7/FLASH_D0 of ESP32
 #define PIN_D8 8 // Pin D8 mapped to pin GPIO8/FLASH_D1 of ESP32
-#define PIN_D9 9 // Pin D9 mapped to pin GPIO9/FLASH_D2 of ESP32
+#define PIN_D9 9 // FtPin D9 mapped to pin GPIO9/FLASH_D2 of ESP32
 
 #define PIN_D10 10 // Pin D10 mapped to pin GPIO10/FLASH_D3 of ESP32
 #define PIN_D11 11 // Pin D11 mapped to pin GPIO11/FLASH_CMD of ESP32
@@ -117,7 +117,7 @@ const int BRAKE_SCK_PIN = 33;
 loadCell *brakeSensor;
 const int brakeScaleFactor = -5000; // modify this to change the scale factor to adjust the sensitivity of the sensor
 const unsigned long period = 300; 
-const int ZeroPin = 25;
+const int ZeroPin = 10;
 debounceButton zeroButton(ZeroPin);
 
 float speed;
@@ -127,7 +127,8 @@ const int I_PIN = 14;
 const int A_PIN = 27;
 const int B_PIN = 26;
 float encoderCount;
-const int angleFactor = 1;
+const float angleFactor = 0.008727;
+float ENCODER_OFFSET = -10.0;
 ESP32Encoder encoder;
 
 
@@ -159,13 +160,15 @@ void encoderSetup()
   ESP32Encoder::useInternalWeakPullResistors=UP;
   encoder.attachHalfQuad(A_PIN, B_PIN);
   
-  // Read the signal of the index pin
-  while(digitalRead(I_PIN))
+  while(!digitalRead(I_PIN))
   {
-    Serial.println("Calibrating angle, please keep turning");
+    // stay inside until I_PIN is 1
+    Serial.println("Calibrating angle, please turn");
+    toggleLED();
   }
-  Serial.println("Done calibrating angle");
-  encoder.setCount(0);
+  Serial.println("Please Stop Steering");
+  encoder.setCount(ENCODER_OFFSET);
+  Serial.println("Setup Successfully");
 
   digitalWrite(LED_BUILTIN,LED_ON);
 }
@@ -779,7 +782,6 @@ void startConfigAP()
 {
 
     digitalWrite(LED_BUILTIN, LED_ON); // turn the LED on by making the voltage LOW to tell us we are in configuration mode.
-
   AsyncWebServer webServer(HTTP_PORT);
 
 #if ( USING_ESP32_S2 || USING_ESP32_C3 )
@@ -1269,6 +1271,8 @@ if (FORMAT_FILESYSTEM)
   
   pBLEScan->start(5, false);
   BLEDevice::getScan()->start(5);
+  pinMode(A_PIN, INPUT_PULLUP);
+  pinMode(B_PIN, INPUT_PULLUP);
   pinMode(I_PIN, INPUT_PULLUP);
   encoderSetup();
   digitalWrite(LED_BUILTIN,LED_ON);
@@ -1303,7 +1307,15 @@ long brakeReading;
 float resistance;
 void loop()
 {
+  // reset angle to 0 when index pin is high
+  if (digitalRead(I_PIN))
+  {
+    encoder.setCount(ENCODER_OFFSET);
+    Serial.println("Re-calibrate steering angle");
+  }
   encoderCount = encoder.getCount();
+  Serial.print("Encoder count: ");
+  Serial.println(encoderCount);
   mb.steeringAngle = encoderCount * angleFactor;
   mb.speed = speed;
   brakeSensor->update(&brakeReading);
