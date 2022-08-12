@@ -47,7 +47,7 @@ FS *filesystem = &LITTLEFS;
 #define PIN_D6 6 // Pin D6 mapped to pin GPIO6/FLASH_SCK of ESP32
 #define PIN_D7 7 // Pin D7 mapped to pin GPIO7/FLASH_D0 of ESP32
 #define PIN_D8 8 // Pin D8 mapped to pin GPIO8/FLASH_D1 of ESP32
-#define PIN_D9 9 // FtPin D9 mapped to pin GPIO9/FLASH_D2 of ESP32
+#define PIN_D9 9 // Pin D9 mapped to pin GPIO9/FLASH_D2 of ESP32
 
 #define PIN_D10 10 // Pin D10 mapped to pin GPIO10/FLASH_D3 of ESP32
 #define PIN_D11 11 // Pin D11 mapped to pin GPIO11/FLASH_CMD of ESP32
@@ -112,8 +112,8 @@ ulong lastWorkingTime = 0;
 #include "debounceButton.h"
 #include "loadCell.h"
 // setting pins for the load cell for braking system
-const int BRAKE_DOUT_PIN = 32;
-const int BRAKE_SCK_PIN = 33;
+const int BRAKE_DOUT_PIN = 13;
+const int BRAKE_SCK_PIN = 16;
 loadCell *brakeSensor;
 const int brakeScaleFactor = -5000; // modify this to change the scale factor to adjust the sensitivity of the sensor
 const unsigned long period = 300; 
@@ -123,12 +123,12 @@ debounceButton zeroButton(ZeroPin);
 float speed;
 
 // Pins for encoder to get steering wheel angle
-const int I_PIN = 14;
-const int A_PIN = 27;
-const int B_PIN = 26;
+const int I_PIN = 2;
+const int A_PIN = 14;
+const int B_PIN = 15;
 float encoderCount;
 const float angleFactor = 0.008727;
-float ENCODER_OFFSET = -10.0;
+float ENCODER_OFFSET = -150.0;
 ESP32Encoder encoder;
 
 
@@ -166,6 +166,7 @@ void encoderSetup()
     Serial.println("Calibrating angle, please turn");
     toggleLED();
   }
+  
   Serial.println("Please Stop Steering");
   encoder.setCount(ENCODER_OFFSET);
   Serial.println("Setup Successfully");
@@ -1320,6 +1321,8 @@ void loop()
   mb.speed = speed;
   brakeSensor->update(&brakeReading);
   mb.brake = brakeReading;
+  Serial.print("Brake: ");
+  Serial.println(mb.brake);
   unsigned long frameTime = millis();
   /* This if statement shouldn't be run when ESP connects to COVISE server, 
         update() shouldn't depend on time as the rate is faster than the response rate anywyas
