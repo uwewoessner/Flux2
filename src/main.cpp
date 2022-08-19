@@ -14,6 +14,14 @@
 #include <WiFi.h>
 #include <WiFiClient.h>
 
+#define ETH_CLK_MODE ETH_CLOCK_GPIO17_OUT
+#define ETH_PHY_POWER 12
+
+#include <ETH.h>
+
+
+static bool eth_connected = false;
+
 #include <SPI.h>
 #include <Wire.h>
 
@@ -108,6 +116,8 @@ bool connected=false;
 bool doConnect=false;
 
 ulong lastWorkingTime = 0;
+ulong lastUpdateTime = 0;
+ulong updatePeriod = 300;
 
 #include "debounceButton.h"
 #include "loadCell.h"
@@ -126,9 +136,10 @@ float speed;
 const int I_PIN = 2;
 const int A_PIN = 14;
 const int B_PIN = 15;
-float encoderCount;
+int64_t encoderCount;
+int64_t oldEncoderCount;
 const float angleFactor = 0.008727;
-float ENCODER_OFFSET = -150.0;
+const int ENCODER_OFFSET = 0;
 ESP32Encoder encoder;
 
 
@@ -146,11 +157,11 @@ static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic,
   
     uint16_t value = 0;
 
-  Serial.print(" of data length ");
-  Serial.println(length);
-  Serial.print("data: ");
+  //Serial.print(" of data length ");
+  //Serial.println(length);
+  //Serial.print("data: ");
   value = *((uint16_t *)pData+1);
-  Serial.println(value);
+  //Serial.println(value);
   speed = value;
 }
 
@@ -160,16 +171,7 @@ void encoderSetup()
   ESP32Encoder::useInternalWeakPullResistors=UP;
   encoder.attachHalfQuad(A_PIN, B_PIN);
   
-  while(!digitalRead(I_PIN))
-  {
-    // stay inside until I_PIN is 1
-    Serial.println("Calibrating angle, please turn");
-    toggleLED();
-  }
-  
-  Serial.println("Please Stop Steering");
-  encoder.setCount(ENCODER_OFFSET);
-  Serial.println("Setup Successfully");
+
 
   digitalWrite(LED_BUILTIN,LED_ON);
 }
@@ -178,15 +180,15 @@ static void notifyStatusCallback(BLERemoteCharacteristic* pBLERemoteCharacterist
                             uint8_t* pData, size_t length, bool isNotify)
 {
   uint8_t value = 0;
-  Serial.print("message reply data length ");
-  Serial.println(length);
-  Serial.print("data: ");
+  //Serial.print("message reply data length ");
+  //Serial.println(length);
+  //Serial.print("data: ");
   value = *((uint8_t *)pData);
-  Serial.println(value);
-  value = *((uint8_t *)pData+1);
-  Serial.println(value);
+  //Serial.println(value);
+  //value = *((uint8_t *)pData+1);
+  //erial.println(value);
   value = *((uint8_t *)pData+2);
-  Serial.println(value);
+  //Serial.println(value);
 }
 
 static void notifyResistanceCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic,
@@ -933,6 +935,42 @@ void doSleep()
   esp_deep_sleep_start();
 }
 
+void WiFiEvent(WiFiEvent_t event)
+{
+  switch (event) {
+    case SYSTEM_EVENT_ETH_START:
+      Serial.println("ETH Started");
+      //set eth hostname here
+      ETH.setHostname("esp32-ethernet");
+      break;
+    case SYSTEM_EVENT_ETH_CONNECTED:
+      Serial.println("ETH Connected");
+      break;
+    case SYSTEM_EVENT_ETH_GOT_IP:
+      Serial.print("ETH MAC: ");
+      Serial.print(ETH.macAddress());
+      Serial.print(", IPv4: ");
+      Serial.print(ETH.localIP());
+      if (ETH.fullDuplex()) {
+        Serial.print(", FULL_DUPLEX");
+      }
+      Serial.print(", ");
+      Serial.print(ETH.linkSpeed());
+      Serial.println("Mbps");
+      eth_connected = true;
+      break;
+    case SYSTEM_EVENT_ETH_DISCONNECTED:
+      Serial.println("ETH Disconnected");
+      eth_connected = false;
+      break;
+    case SYSTEM_EVENT_ETH_STOP:
+      Serial.println("ETH Stopped");
+      eth_connected = false;
+      break;
+    default:
+      break;
+  }
+}
 void setup()
 {
   //set led pin as output
@@ -1076,6 +1114,10 @@ if (FORMAT_FILESYSTEM)
   }
 
   digitalWrite(LED_BUILTIN,LED_ON);
+  
+  WiFi.onEvent(WiFiEvent);
+  ETH.begin();
+
   if (initialConfig)
   {
     Serial.print(F("Starting configuration portal @ "));
@@ -1315,25 +1357,15 @@ void loop()
     Serial.println("Re-calibrate steering angle");
   }
   encoderCount = encoder.getCount();
-  Serial.print("Encoder count: ");
-  Serial.println(encoderCount);
+  if(encoderCount != oldEncoderCount)
+  {
+    Serial.print("Encoder count: ");
+    Serial.println(encoderCount);
+    oldEncoderCount = encoderCount;
+  }
   mb.steeringAngle = encoderCount * angleFactor;
   mb.speed = speed;
-  brakeSensor->update(&brakeReading);
-  mb.brake = brakeReading;
-  Serial.print("Brake: ");
-  Serial.println(mb.brake);
   unsigned long frameTime = millis();
-  /* This if statement shouldn't be run when ESP connects to COVISE server, 
-        update() shouldn't depend on time as the rate is faster than the response rate anywyas
-  if (frameTime - lastWorkingTime >= period)
-  {
-    brakeSensor->update(&brakeReading);
-    mb.brake = brakeReading;
-    Serial.print("mb. Result: ");
-    Serial.println(mb.brake);
-  }
-  */
  if(doConnect)
  {
   connectToServer();
@@ -1368,16 +1400,16 @@ void loop()
      // resistance depends on the value sent from COVISE through UDP
      msg.resistance = resistance;
      pResistanceCharacteristic->writeValue((uint8_t *)&msg, sizeof(msg),true);
-    Serial.println("update");
+    //Serial.println("update");
      result = pResistanceCharacteristic->readRawData();
      if(result)
        {
-         Serial.print(result[0]);
-         Serial.print(result[1]);
-         Serial.println(result[2]);
+         //Serial.print(result[0]);
+         //Serial.print(result[1]);
+         //Serial.println(result[2]);
        }
        else{
-        Serial.println("noResponse");
+        //Serial.println("noResponse");
        }
        //sleep(1);
    }
@@ -1458,18 +1490,22 @@ void loop()
   }
   if (coverIP != 0)
   {
-    toCOVER.beginPacket(coverIP, coverPort);
-    mb.brake = brakeReading;
-    mb.steeringAngle = encoderCount * angleFactor;
-    toCOVER.beginPacket(coverIP, pluginPort);
-    toCOVER.write((const uint8_t *)&mb, sizeof(mb));
-    toCOVER.endPacket();
-    lastWorkingTime=frameTime;
-    digitalWrite(LED_BUILTIN, LED_ON);
+    if (frameTime - lastUpdateTime >= updatePeriod)
+    {
+      brakeSensor->update(&brakeReading);
+      toCOVER.beginPacket(coverIP, coverPort);
+      mb.brake = brakeReading;
+      mb.steeringAngle = encoderCount * angleFactor;
+      toCOVER.beginPacket(coverIP, pluginPort);
+      toCOVER.write((const uint8_t *)&mb, sizeof(mb));
+      toCOVER.endPacket();
+      lastWorkingTime = frameTime;
+    }
   }
   else // we are not doing anything
   {
-    static bool timeoutWarning = false;
+      digitalWrite(LED_BUILTIN, LED_OFF);
+   /* static bool timeoutWarning = false;
     if ((frameTime - lastWorkingTime) > 600000)
     {
       if (!timeoutWarning)
@@ -1490,11 +1526,10 @@ void loop()
     {
       nblink++;
       toggleLED();
-    }
+    }*/
   }
 
   check_status();
-  delay(100);
   }
 
 
