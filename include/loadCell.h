@@ -7,9 +7,8 @@ class loadCell
 {
     public:
         loadCell(int dout_pin, int sck_pin);
-        void update(long* brakeReading); // return the float of the magnitude of force applied on the load cell
+        float getForce(); // return the float of the magnitude of force applied on the load cell
         void calcZeroOffset();
-        int doutPin;
 
     private:
         HX711 brakeSensor;
