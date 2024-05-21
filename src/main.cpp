@@ -20,6 +20,8 @@ modify async wifi manager so that it does not try to connect after saving
 #include <ESP32Encoder.h>
 #define DeviceName "Flux2"
 #include "BLEDevice.h"
+#undef WIFIManager
+#ifdef WIFIManager
 
 #define ESP_ASYNC_WIFIMANAGER_VERSION_MIN_TARGET "ESPAsync_WiFiManager v1.9.2"
 
@@ -29,6 +31,8 @@ modify async wifi manager so that it does not try to connect after saving
 #include <esp_wifi.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+
+#endif
 
 #define ETH_CLK_MODE ETH_CLOCK_GPIO17_OUT
 #define ETH_PHY_POWER 12
@@ -42,18 +46,25 @@ static bool eth_link = false;
 #include <Wire.h>
 
 // From v1.1.1
+#ifdef WIFIManager
 #include <WiFiMulti.h>
 WiFiMulti wifiMulti;
+#endif
 
 // Use LittleFS
 //#include "FS.h"
 
-#include <LITTLEFS.h>
+#include <LittleFS.h>
 
-FS *filesystem = &LITTLEFS;
-#define FileFS LITTLEFS
+TaskHandle_t Task0;
+
+void BluetoothLoop( void * parameter );
+
+FS *filesystem = &LittleFS;
+#define FileFS LittleFS
 #define FS_Name "LittleFS"
 
+BLEClient *pClient=nullptr;
 #define ESP_getChipId() ((uint32_t)ESP.getEfuseMac())
 
 // SSID and PW for Config Portal
@@ -266,10 +277,14 @@ IPAddress gatewayIP = IPAddress(192, 168, 0, 1);
 IPAddress netMask = IPAddress(255, 255, 255, 0);
 #endif
 
+#ifdef WIFIManager
 #define USE_CONFIGURABLE_DNS true
 
 IPAddress dns1IP = gatewayIP;
 IPAddress dns2IP = IPAddress(8, 8, 8, 8);
+#else
+#define USE_CONFIGURABLE_DNS false
+#endif
 
 #define USE_CUSTOM_AP_IP false
 
@@ -347,7 +362,7 @@ uint8_t connectMultiWiFi()
   // WiFi.mode(WIFI_STA);
 
   LOGERROR(F("ConnectMultiWiFi with :"));
-
+#ifdef WIFIManager
   if ((Router_SSID != "") && (Router_Pass != ""))
   {
     LOGERROR3(F("* Flash-stored Router_SSID = "), Router_SSID, F(", Router_Pass[0] = "), Router_Pass[0]);
@@ -398,6 +413,7 @@ uint8_t connectMultiWiFi()
   {
     LOGERROR(F("WiFi not connected"));
   }
+  #endif
 
   return status;
 }
@@ -488,6 +504,7 @@ void saveConfigData()
 void startConfigAP()
 {
 
+#ifdef WIFIManager
   digitalWrite(LED_BUILTIN, LED_ON); // turn the LED on by making the voltage LOW to tell us we are in configuration mode.
 
   AsyncWebServer webServer(HTTP_PORT);
@@ -623,6 +640,7 @@ void startConfigAP()
   }
   ESPAsync_wifiManager.getSTAStaticIPConfig(WM_STA_IPconfig);
   saveConfigData();
+  #endif
 
   digitalWrite(LED_BUILTIN, LED_OFF); // Turn led off as we are not in configuration mode.
 }
@@ -677,8 +695,8 @@ void toggleLED()
 static void notifyCallback(BLERemoteCharacteristic *pBLERemoteCharacteristic,
                            uint8_t *pData, size_t length, bool isNotify)
 {
-  Serial.print("Notify callback for characteristic ");
-  Serial.print(pBLERemoteCharacteristic->getUUID().toString().c_str());
+  //Serial.print("Notify callback for characteristic ");
+  //Serial.print(pBLERemoteCharacteristic->getUUID().toString().c_str());
 
   uint16_t value = 0;
 
@@ -693,7 +711,7 @@ static void notifyCallback(BLERemoteCharacteristic *pBLERemoteCharacteristic,
 void encoderSetup()
 {
   // Encoder setup
-  ESP32Encoder::useInternalWeakPullResistors = UP;
+  ESP32Encoder::useInternalWeakPullResistors = puType::up;
   encoder.attachHalfQuad(A_PIN, B_PIN);
 
   digitalWrite(LED_BUILTIN, LED_ON);
@@ -739,18 +757,20 @@ class MyClientCallback : public BLEClientCallbacks
 
   void onDisconnect(BLEClient *pclient)
   {
-    connected = false;
+    //connected = false;
     Serial.println("onDisconnect");
+    doConnect = true;
+    delete pClient;
+    pClient = nullptr;
   }
 };
-
 /* Start connection to the BLE Server */
 bool connectToServer()
 {
   Serial.print("Forming a connection to ");
   Serial.println(myDevice->getAddress().toString().c_str());
 
-  BLEClient *pClient = BLEDevice::createClient();
+  pClient = BLEDevice::createClient();
   Serial.println(" - Created client");
 
   pClient->setClientCallbacks(new MyClientCallback());
@@ -793,18 +813,18 @@ bool connectToServer()
     pRemoteCharacteristic->registerForNotify(notifyCallback);
   }
 
-  pStatusRemoteCharacteristic = pRemoteService->getCharacteristic(charStatusUUID);
-  if (pStatusRemoteCharacteristic == nullptr)
-  {
-    Serial.print("Failed to find our characteristic UUID: ");
-    Serial.println(charStatusUUID.toString().c_str());
-    pClient->disconnect();
-    return false;
-  }
-  if (pStatusRemoteCharacteristic->canNotify())
-  {
-    pStatusRemoteCharacteristic->registerForNotify(notifyStatusCallback);
-  }
+  //pStatusRemoteCharacteristic = pRemoteService->getCharacteristic(charStatusUUID);
+  //if (pStatusRemoteCharacteristic == nullptr)
+  //{
+  //  Serial.print("Failed to find our characteristic UUID: ");
+  //  Serial.println(charStatusUUID.toString().c_str());
+  //  pClient->disconnect();
+  //  return false;
+  //}
+  //if (pStatusRemoteCharacteristic->canNotify())
+  //{
+  //  pStatusRemoteCharacteristic->registerForNotify(notifyStatusCallback);
+  //}
   pResistanceCharacteristic = pRemoteService->getCharacteristic(charPowerUUID);
   if (pResistanceCharacteristic == nullptr)
   {
@@ -814,7 +834,7 @@ bool connectToServer()
     return false;
   }
 
-  pResistanceCharacteristic->registerForNotify(notifyResistanceCallback);
+  // we don't nedd this pResistanceCharacteristic->registerForNotify(notifyResistanceCallback);
   connected = true;
   return true;
 }
@@ -998,6 +1018,7 @@ void setup()
   initAPIPConfigStruct(WM_AP_IPconfig);
   initSTAIPConfigStruct(WM_STA_IPconfig);
 
+#ifdef WIFIManager
   AsyncWebServer webServer(HTTP_PORT);
 
   DNSServer dnsServer;
@@ -1031,16 +1052,17 @@ void setup()
 #if USING_CORS_FEATURE
   ESPAsync_wifiManager.setCORSHeader("Your Access-Control-Allow-Origin");
 #endif
-
   Router_SSID = ESPAsync_wifiManager.WiFi_SSID();
   Router_Pass = ESPAsync_wifiManager.WiFi_Pass();
 
+#endif
   // SSID to uppercase
   ssid.toUpperCase();
   password = DeviceName;
 
   bool configDataLoaded = false;
 
+#ifdef WIFIManager
   // From v1.1.0, Don't permit NULL password
   if ((Router_SSID != "") && (Router_Pass != ""))
   {
@@ -1050,14 +1072,17 @@ void setup()
     ESPAsync_wifiManager.setConfigPortalTimeout(120); // If no access point name has been previously entered disable timeout.
     Serial.println(F("Got ESP Self-Stored Credentials. Timeout 120s for Config Portal"));
   }
+  #endif
 
   digitalWrite(LED_BUILTIN, LED_ON);
   if (loadConfigData())
   {
     configDataLoaded = true;
 
+#ifdef WIFWManager
     ESPAsync_wifiManager.setConfigPortalTimeout(120); // If no access point name has been previously entered disable timeout.
     Serial.println(F("Got stored Credentials. Timeout 120s for Config Portal"));
+    #endif
 
 #if USE_ESP_WIFIMANAGER_NTP
     if (strlen(WM_config.TZ_Name) > 0)
@@ -1084,6 +1109,7 @@ void setup()
     initialConfig = true;
   }
 
+#ifdef WIFWManager
   digitalWrite(LED_BUILTIN, LED_ON);
   if (initialConfig)
   {
@@ -1106,7 +1132,6 @@ void setup()
     // If not specified device will remain in configuration mode until
     // switched off via webserver or device is restarted.
     // ESPAsync_wifiManager.setConfigPortalTimeout(600);
-
     // Starts an access point
     if (!ESPAsync_wifiManager.startConfigPortal((const char *)ssid.c_str(), password.c_str()))
       Serial.println(F("Not connected to WiFi but continuing anyway."));
@@ -1136,8 +1161,11 @@ void setup()
       // Don't permit NULL SSID and password len < MIN_AP_PASSWORD_SIZE (8)
       if ((String(WM_config.WiFi_Creds[i].wifi_ssid) != "") && (strlen(WM_config.WiFi_Creds[i].wifi_pw) >= MIN_AP_PASSWORD_SIZE))
       {
+        
+#ifdef WIFIManager
         LOGERROR3(F("* Add SSID = "), WM_config.WiFi_Creds[i].wifi_ssid, F(", PW = "), WM_config.WiFi_Creds[i].wifi_pw);
         wifiMulti.addAP(WM_config.WiFi_Creds[i].wifi_ssid, WM_config.WiFi_Creds[i].wifi_pw);
+        #endif
       }
     }
 
@@ -1179,7 +1207,7 @@ void setup()
 
     saveConfigData();
   }
-
+#endif
   /* no need to connect to a wifi, we just use the IP config
     if (!initialConfig)
     {
@@ -1246,16 +1274,20 @@ void setup()
 
           // ETH.config(IPAddress(192, 168, 0, 45), IPAddress(192, 168, 0, 1), IPAddress(255, 255, 255, 0), IPAddress(8, 8, 8, 8));
 
+#ifdef WIFWManager
           startConfigAP();
           Serial.println(ESPAsync_wifiManager.getStatus(WiFi.status()));
+          #endif
           connectionTimeout = millis();
         }
       }
     }
     else if (!eth_link && ((millis() - connectionTimeout) > 5000))
     {
+#ifdef WIFWManager
       startConfigAP();
       Serial.println(ESPAsync_wifiManager.getStatus(WiFi.status()));
+      #endif
     }
     else
     {
@@ -1336,6 +1368,8 @@ void setup()
   digitalWrite(LED_BUILTIN, LED_ON);
 
   brakeSensor = new loadCell(BRAKE_DOUT_PIN, BRAKE_SCK_PIN);
+  xTaskCreatePinnedToCore(    BluetoothLoop,    "Bluetooth_send_forces",    5000,      NULL,    2,    &Task0,    0);
+   
   Serial.println("Finished Setup");
 }
 
@@ -1402,56 +1436,17 @@ void loop()
   }
   mb.steeringAngle = encoderCount * angleFactor;
   mb.speed = speed;
+  
+      //Serial.printf("test1 %d\n",(millis() - frameTime));
+      frameTime = millis();
   if (doConnect)
   {
     connectToServer();
     doConnect = false;
   }
-  if (connected)
-  {
-    if (pResistanceCharacteristic)
-    {
-      uint8_t *result;
-      if (firstTime)
-      {
-        Serial.println("do Init    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
-        powerMessage msg;
-        msg.opCode = ocReset;
-        msg.resistance = 100;
-        pResistanceCharacteristic->writeValue((uint8_t *)&msg, 1, true);
-        sleep(1);
-        msg.opCode = ocRequesControl;
-        msg.resistance = 100;
-        pResistanceCharacteristic->writeValue((uint8_t *)&msg, 1, true);
-        sleep(1);
-        msg.opCode = ocStart;
-        msg.resistance = 100;
-        pResistanceCharacteristic->writeValue((uint8_t *)&msg, 1, true);
-        sleep(1);
-        firstTime = false;
-      }
-      // setting target resistance level, this should depend on the brake (load cell)
-      powerMessage msg;
-      msg.opCode = ocSetTargetResistaneLevel;
-      // resistance depends on the value sent from COVISE through UDP
-      msg.resistance = resistance;
-      pResistanceCharacteristic->writeValue((uint8_t *)&msg, sizeof(msg), true);
-      // Serial.println("update");
-      result = pResistanceCharacteristic->readRawData();
-      if (result)
-      {
-        // Serial.print(result[0]);
-        // Serial.print(result[1]);
-        // Serial.println(result[2]);
-      }
-      else
-      {
-        // Serial.println("noResponse");
-      }
-      // sleep(1);
-    }
-  }
-
+  
+      //Serial.printf("test11 %d\n",(millis() - frameTime));
+      frameTime = millis();
   mb.state = 0;
   if (zeroButton.wasKlicked())
   {
@@ -1502,10 +1497,11 @@ void loop()
   int received = toCOVER.parsePacket();
   if (received > 0)
   {
-    char buffer[100];
-    int numRead = toCOVER.read(buffer, 100);
+    char buffer[500];
+    int numRead = toCOVER.read(buffer, 500);
     if (numRead > 0)
     {
+      //Serial.print(buffer);
       if (numRead >= 5)
       {
         if (strcmp(buffer, "enum") == 0)
@@ -1515,7 +1511,7 @@ void loop()
         }
         else if (strcmp(buffer, "start") == 0)
         {
-          Serial.printf("start\n");
+          Serial.printf("remoteStart\n");
           coverIP = toCOVER.remoteIP();
         }
         else if (strcmp(buffer, "stop") == 0)
@@ -1536,13 +1532,15 @@ void loop()
         {
           // if our last message was sent more than 1/30th of a second ago we reply to this message from OpenCOVER 
           lastUpdateTime = 0;
+          
+      //Serial.printf("resistance: %f\n",resistance);
         }
         else if ((frameTime - lastUpdateTime) >= updatePeriod - 32)// make sure we send a message back not later than 32ms
         {
           lastUpdateTime = (frameTime - updatePeriod)+32; 
         }
-        // Serial.print("Resistance: ");
-        // Serial.println(resistance);
+         //Serial.print("Resistance: ");
+         //Serial.println(resistance);
       }
       else
       {
@@ -1554,13 +1552,16 @@ void loop()
   {
     if (frameTime - lastUpdateTime >= updatePeriod)
     {
+      //Serial.printf("mb1:\n");
+      lastUpdateTime = frameTime;
       mb.brake = brakeSensor->getForce();
       mb.steeringAngle = encoderCount * angleFactor;
       toCOVER.beginPacket(coverIP, pluginPort);
       toCOVER.write((const uint8_t *)&mb, sizeof(mb));
       toCOVER.endPacket();
+      
+      //Serial.printf("mb: %f, %f, %d\n",mb.speed,mb.steeringAngle,(millis() - lastUpdateTime));
       lastWorkingTime = frameTime;
-      lastUpdateTime = frameTime;
     }
   }
   else // we are not doing anything
@@ -1568,5 +1569,54 @@ void loop()
     digitalWrite(LED_BUILTIN, LED_OFF);
   }
 
-  check_status();
+      //Serial.printf("test2 %d\n",(millis() - frameTime));
+      frameTime = millis();
+  //check_status();
+  
+      //Serial.printf("test3 %d\n",(millis() - frameTime));
+}
+
+
+void sendForce()
+{
+  if (connected)
+  {
+    if (pResistanceCharacteristic)
+    {
+      uint8_t *result;
+      if (firstTime)
+      {
+        Serial.println("do Init    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
+        powerMessage msg;
+        msg.opCode = ocReset;
+        msg.resistance = 100;
+        pResistanceCharacteristic->writeValue((uint8_t *)&msg, 1, true);
+        sleep(1);
+        msg.opCode = ocRequesControl;
+        msg.resistance = 100;
+        pResistanceCharacteristic->writeValue((uint8_t *)&msg, 1, true);
+        sleep(1);
+        msg.opCode = ocStart;
+        msg.resistance = 100;
+        pResistanceCharacteristic->writeValue((uint8_t *)&msg, 1, true);
+        sleep(1);
+        firstTime = false;
+      }
+      // setting target resistance level, this should depend on the brake (load cell)
+      powerMessage msg;
+      msg.opCode = ocSetTargetResistaneLevel;
+      // resistance depends on the value sent from COVISE through UDP
+      msg.resistance = resistance;
+      pResistanceCharacteristic->writeValue((uint8_t *)&msg, sizeof(msg), true);
+    }
+    else{ sleep(1);}
+  }
+  else{ sleep(1);}
+}
+
+void BluetoothLoop( void * parameter )
+{
+   for (;;) {
+    sendForce();
+   }
 }
