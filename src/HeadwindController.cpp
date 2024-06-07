@@ -117,6 +117,10 @@ HeadwindController::HeadwindController(BLEAddress *macAddress) {
     address = macAddress;
 };
 
+HeadwindController::~HeadwindController()
+{
+}
+
 void HeadwindController::onDisconnect(BLEClient *pclient)
 {
     Serial.println("onDisconnect");
